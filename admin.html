@@ -1,0 +1,39 @@
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>بلاتينيوم | إدارة اشتراكات التوفل</title><style>
+*{box-sizing:border-box}body{margin:0;background:#f1f5f9;color:#172238;font:16px system-ui}header{background:#122c52;color:#fff;padding:20px}main{max-width:1150px;margin:20px auto;padding:0 15px}.panel{background:#fff;border:1px solid #d9e2ed;border-radius:15px;padding:20px;margin:16px 0}h1{font-size:23px;margin:0}h2{font-size:19px}label{display:block;margin:12px 0 5px}input{padding:11px;border:1px solid #aab7c8;border-radius:8px;width:100%;font:inherit}button{border:0;background:#173c70;color:white;border-radius:8px;padding:10px 15px;cursor:pointer;font:inherit;margin:5px}button:disabled{opacity:.5}table{width:100%;border-collapse:collapse;min-width:780px}td,th{border-bottom:1px solid #e1e8ef;padding:9px;text-align:right}small{color:#65728a}.scroll{overflow:auto}.flex{display:flex;gap:15px;flex-wrap:wrap}.flex>*{flex:1;min-width:200px}.status{white-space:pre-wrap;min-height:20px;color:#7b3400}#app{display:none}</style></head><body><header><h1>PLATINUM ACADEMY | إدارة اشتراكات التوفل الوطني</h1><div>مدة الاشتراك 60 يومًا من أول دخول مؤهل</div></header><main>
+<section class="panel" id="loginPanel"><h2>دخول مدير الأكاديمية</h2><form id="loginForm"><label>البريد الإلكتروني الإداري</label><input type="email" id="email" required autocomplete="username"><label>كلمة المرور</label><input type="password" id="password" required autocomplete="current-password"><button>دخول</button></form></section>
+<div id="app"><section class="panel"><button id="logout">تسجيل الخروج</button><h2>إضافة طالب جديد</h2><form id="createForm"><div class="flex"><div><label>اسم الطالب</label><input id="full_name" required minlength="2"></div><div><label>اسم المستخدم (إنجليزي)</label><input id="username" required pattern="[A-Za-z0-9._-]{4,40}" placeholder="student001"></div><div><label>رقم الهاتف</label><input id="phone"></div><div><label>كلمة المرور (12 حرفًا على الأقل)</label><input id="new_password" type="password" required minlength="12" autocomplete="new-password"></div></div><button>إنشاء حساب غير مفعّل</button></form><small>اسم المستخدم وكلمة المرور يُسلّمان للطالب بطريقة خاصة. لا يبدأ الاشتراك إلا بعد موافقة الإدارة وأول دخول للطالب.</small></section>
+<section class="panel"><h2>الطلاب والاشتراكات</h2><button id="refresh">تحديث القائمة</button><div class="scroll"><table><thead><tr><th>الطالب</th><th>اسم المستخدم</th><th>الحالة</th><th>أول دخول</th><th>الانتهاء</th><th>إجراءات</th></tr></thead><tbody id="students"></tbody></table></div></section></div>
+<p class="status" id="status" role="status"></p></main>
+<script type="module">
+import {createClient} from 'https://esm.sh/@supabase/supabase-js@2';
+import {URL,KEY} from './config.js';
+const sb=createClient(URL,KEY),$=id=>document.getElementById(id),fn=URL+'/functions/v1/toefl-admin';
+const say=t=>$('status').textContent=t;
+async function api(body){
+ const {data:{session}}=await sb.auth.getSession();
+ if(!session)throw Error('يجب تسجيل الدخول أولًا');
+ const r=await fetch(fn,{method:'POST',headers:{'Content-Type':'application/json','apikey':KEY,'Authorization':'Bearer '+session.access_token},body:JSON.stringify(body)});
+ const j=await r.json();if(!r.ok)throw Error(j.error||'تعذّر تنفيذ الطلب');return j;
+}
+async function refresh(){
+ const {students}=await api({action:'list'});const tbody=$('students');tbody.replaceChildren();
+ for(const s of students){
+  const tr=document.createElement('tr');const td=t=>{const c=document.createElement('td');c.textContent=t;tr.append(c);return c};
+  td(s.full_name);td(s.username||'');td(s.is_blocked?'موقوف':!s.is_approved?'بانتظار التفعيل':!s.first_login_at?'مفعّل — لم يدخل بعد':new Date(s.expires_at)>new Date()?'نشط':'منتهي');
+  td(s.first_login_at?new Date(s.first_login_at).toLocaleString('ar-JO'):'—');
+  td(s.expires_at?new Date(s.expires_at).toLocaleString('ar-JO'):'—');
+  const actions=td('');
+  for(const [action,label] of [['approve','تفعيل'],['block','إيقاف'],['unblock','إلغاء الإيقاف'],['renew','تجديد 60 يومًا']]){
+   const b=document.createElement('button');b.textContent=label;b.onclick=async()=>{
+    if(!confirm(`تأكيد ${label} للطالب ${s.full_name}؟`))return;
+    try{await api({action,student_id:s.id,days:60});say('تم تنفيذ العملية');await refresh()}catch(e){say(e.message)}
+   };actions.append(b);
+  }
+  tbody.append(tr);
+ }
+}
+$('loginForm').onsubmit=async e=>{e.preventDefault();try{say('جارٍ تسجيل الدخول...');const {error}=await sb.auth.signInWithPassword({email:$('email').value.trim(),password:$('password').value});if(error)throw error;await refresh();$('app').style.display='block';$('loginPanel').style.display='none';say('تم تسجيل الدخول كمدير')}catch(e){await sb.auth.signOut();say(e.message)}};
+$('createForm').onsubmit=async e=>{e.preventDefault();try{const payload={action:'create',full_name:$('full_name').value,username:$('username').value,phone:$('phone').value,password:$('new_password').value};await api(payload);$('createForm').reset();say('تم إنشاء الطالب. الحساب بانتظار التفعيل.');await refresh()}catch(e){say(e.message)}};
+$('refresh').onclick=()=>refresh().then(()=>say('تم التحديث')).catch(e=>say(e.message));
+$('logout').onclick=async()=>{await sb.auth.signOut();$('app').style.display='none';$('loginPanel').style.display='block';say('تم تسجيل الخروج')};
+</script></body></html>
